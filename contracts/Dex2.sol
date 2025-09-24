@@ -18,8 +18,8 @@ contract Interactor{
     function swapExactInputSingle (
     PoolKey memory poolKey,
     bool zeroForOne,
-    uint128 amountIn
-
+    uint128 amountIn,
+    uint128 amountOutMinimum
     ) external returns (uint128 amountOut) {
         if (amountIn == ActionConstants.OPEN_DELTA) {
             revert("OPEN_DELTA not supported");
@@ -35,30 +35,10 @@ contract Interactor{
         });
 
         BalanceDelta delta = poolManager.swap(poolKey, params, bytes(""));
-        amountOut = uint128(zeroForOne ? -BalanceDeltaLibrary.amount1(delta) : -BalanceDeltaLibrary.amount0(delta));
-
-    }
-
-    function _swap(
-        PoolKey memory poolKey,
-        bool zeroForOne,
-        uint128 amountIn,
-        uint128 amountOutMinimum
-    ) public returns (uint amountOut) {
-        BalanceDelta delta = poolManager.swap(
-            poolKey,
-            SwapParams({
-                zeroForOne: zeroForOne,
-                amountSpecified: -int256(uint256(amountIn)), 
-                sqrtPriceLimitX96: zeroForOne 
-                    ? TickMath.MIN_SQRT_PRICE + 1 
-                    : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            bytes("") 
-        );
-
         amountOut = uint128(
-            zeroForOne ? -delta.amount1() : -delta.amount0()
+            zeroForOne 
+                ? -BalanceDeltaLibrary.amount1(delta) 
+                : -BalanceDeltaLibrary.amount0(delta)
         );
 
         require(amountOut >= amountOutMinimum, "Too little received");
