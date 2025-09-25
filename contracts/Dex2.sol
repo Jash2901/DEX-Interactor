@@ -7,26 +7,45 @@ import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {ActionConstants} from "@uniswap/v4-periphery/src/libraries/ActionConstants.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
+import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 
-contract Interactor{
+contract Interactor is IUnlockCallback {
     IPoolManager public poolManager;
 
-    constructor(address _poolManager){
+    constructor(address _poolManager) {
         poolManager = IPoolManager(_poolManager);
     }
 
-    function swapExactInputSingle (
-    PoolKey memory poolKey,
-    bool zeroForOne,
-    uint128 amountIn,
-    uint128 amountOutMinimum
+    function swapExactInputSingle(
+        PoolKey memory poolKey,
+        bool zeroForOne,
+        uint128 amountIn,
+        uint128 amountOutMinimum
     ) external returns (uint128 amountOut) {
         if (amountIn == ActionConstants.OPEN_DELTA) {
             revert("OPEN_DELTA not supported");
         }
 
+        bytes memory data = abi.encode(poolKey, zeroForOne, amountIn, amountOutMinimum);
+        bytes memory result = poolManager.unlock(data);
+
+        amountOut = abi.decode(result, (uint128));
+    }
+
+    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+        require(msg.sender == address(poolManager), "Only poolManager");
+
+        (
+            PoolKey memory poolKey,
+            bool zeroForOne,
+            uint128 amountIn,
+            uint128 amountOutMinimum
+        ) = abi.decode(data, (PoolKey, bool, uint128, uint128));
+
         int256 amountSpecified = -int256(uint256(amountIn));
-        uint160 sqrtPriceLimitX96 = zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1;
+        uint160 sqrtPriceLimitX96 = zeroForOne
+            ? TickMath.MIN_SQRT_PRICE + 1
+            : TickMath.MAX_SQRT_PRICE - 1;
 
         SwapParams memory params = SwapParams({
             zeroForOne: zeroForOne,
@@ -35,13 +54,15 @@ contract Interactor{
         });
 
         BalanceDelta delta = poolManager.swap(poolKey, params, bytes(""));
-        amountOut = uint128(
-            zeroForOne 
-                ? -BalanceDeltaLibrary.amount1(delta) 
+
+        uint128 amountOut = uint128(
+            zeroForOne
+                ? -BalanceDeltaLibrary.amount1(delta)
                 : -BalanceDeltaLibrary.amount0(delta)
         );
 
         require(amountOut >= amountOutMinimum, "Too little received");
-    }
 
+        return abi.encode(amountOut); 
+    }
 }
