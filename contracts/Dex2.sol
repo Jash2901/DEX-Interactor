@@ -8,9 +8,14 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {ActionConstants} from "@uniswap/v4-periphery/src/libraries/ActionConstants.sol";
 import {BalanceDelta, BalanceDeltaLibrary} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {CurrencyLibrary, Currency} from "@uniswap/v4-core/src/types/Currency.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract Interactor is IUnlockCallback {
+    
     IPoolManager public poolManager;
+    address private currentUser;
 
     constructor(address _poolManager) {
         poolManager = IPoolManager(_poolManager);
@@ -26,8 +31,12 @@ contract Interactor is IUnlockCallback {
             revert("OPEN_DELTA not supported");
         }
 
+        currentUser = msg.sender;
+
         bytes memory data = abi.encode(poolKey, zeroForOne, amountIn, amountOutMinimum);
         bytes memory result = poolManager.unlock(data);
+
+        currentUser = address(0);
 
         amountOut = abi.decode(result, (uint128));
     }
@@ -54,6 +63,39 @@ contract Interactor is IUnlockCallback {
         });
 
         BalanceDelta delta = poolManager.swap(poolKey, params, bytes(""));
+
+        int256 delta0 = BalanceDeltaLibrary.amount0(delta);
+        int256 delta1 = BalanceDeltaLibrary.amount1(delta);
+
+        address token0 = Currency.unwrap(poolKey.currency0);
+        address token1 = Currency.unwrap(poolKey.currency1);
+
+        if (delta0 < 0) {
+            IERC20(token0).transferFrom(
+                currentUser,
+                address(poolManager),
+                uint256(-delta0)
+            );
+        }
+                if (delta1 < 0) {
+            IERC20(token1).transferFrom(
+                currentUser,
+                address(poolManager),
+                uint256(-delta1)
+            );
+        }
+        if (delta0 > 0) {
+            IERC20(token0).transfer(
+                currentUser,
+                uint256(delta0)
+            );
+        }
+        if (delta1 > 0) {
+            IERC20(token1).transfer(
+                currentUser,
+                uint256(delta1)
+            );
+        }
 
         uint128 amountOut = uint128(
             zeroForOne
